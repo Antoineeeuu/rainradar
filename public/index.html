@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="fr" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>RailRadar — les trains de France en temps réel</title>
+  <meta name="description" content="Suivez en direct les TGV, OUIGO, Intercités et TER sur la carte de France, avec leurs retards réels. Cliquez sur un train pour voir son trajet, ses arrêts et sa vitesse estimée.">
+  <meta name="theme-color" content="#0b1220">
+  <meta property="og:title" content="RailRadar — les trains de France en temps réel">
+  <meta property="og:description" content="La carte en direct des trains français, retards compris.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="map" aria-label="Carte des trains"></div>
+
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="RailRadar">
+      <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+        <rect width="32" height="32" rx="8" fill="#FFC83D"/>
+        <path d="M16 5c4 4 7 9 7 15v2a3 3 0 0 1-3 3h-8a3 3 0 0 1-3-3v-2c0-6 3-11 7-15z" fill="#0b1220"/>
+        <path d="M12.5 14.5c2-2.3 5-2.3 7 0l-.6 3.5h-5.8z" fill="#FFC83D"/>
+        <circle cx="12.5" cy="21" r="1.3" fill="#FFC83D"/><circle cx="19.5" cy="21" r="1.3" fill="#FFC83D"/>
+      </svg>
+      <span class="brand-name">RailRadar</span>
+    </a>
+    <div class="search" role="search">
+      <span class="search-icon" id="searchIcon"></span>
+      <input id="q" type="search" autocomplete="off" spellcheck="false" enterkeyhint="search"
+             data-i18n-placeholder="searchPlaceholder" data-i18n-title="searchLabel">
+      <div id="results" class="results" hidden></div>
+    </div>
+    <div class="top-actions">
+      <button class="icon-btn" id="btnFavs" data-i18n-title="favorites"></button>
+      <button class="icon-btn text-btn" id="btnLang" data-i18n-title="language">EN</button>
+      <button class="icon-btn" id="btnAbout" data-i18n-title="about"></button>
+    </div>
+  </header>
+
+  <nav class="chips" id="chips" data-i18n-title="filtersLabel"></nav>
+
+  <aside id="panel" class="panel" hidden></aside>
+
+  <button class="live" id="live" type="button">
+    <span class="pulse" id="pulse"></span>
+    <span id="liveText" data-i18n="loading"></span>
+  </button>
+
+  <div class="tools">
+    <div class="basemaps" id="basemaps" hidden></div>
+    <button class="icon-btn" id="btnLayers" data-i18n-title="basemap"></button>
+    <button class="icon-btn" id="btnLocate" data-i18n-title="locate"></button>
+    <div class="zoom">
+      <button class="icon-btn" id="btnZoomIn" data-i18n-title="zoomIn"></button>
+      <button class="icon-btn" id="btnZoomOut" data-i18n-title="zoomOut"></button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <dialog id="about" class="modal">
+    <div class="modal-head">
+      <h2 data-i18n="aboutTitle"></h2>
+      <button class="icon-btn" id="aboutClose" data-i18n-title="close"></button>
+    </div>
+    <div class="modal-body" data-i18n-html="aboutBody"></div>
+  </dialog>
+
+  <noscript><p class="noscript">RailRadar a besoin de JavaScript pour afficher la carte.</p></noscript>
+
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
