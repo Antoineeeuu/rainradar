@@ -4,11 +4,18 @@ import { t, setLang, getLang, applyI18n } from './i18n.js';
 import { decodeTripUpdates, decodeAlerts } from './gtfsrt.js';
 import { loadRail, sliceCoords } from './rail.js';
 import { buildTrains, locate, allPaths, delayLevel, GROUPS } from './trains.js';
-import { loadMapIcons, ICON_PIXEL_RATIO, TYPE_STYLE, GROUP_STYLE, sideArt, modelName, UI } from './icons.js';
+import { loadMapIcons, ICON_PIXEL_RATIO, TYPE_STYLE, GROUP_STYLE, sideArt, modelName, UI, arrowImage, urbanArt, urbanModel } from './icons.js';
+import { Urban, CITIES, zoomFor } from './urban.js';
 
 // ---- Réglages -----------------------------------------------------------------------------
 
 const SITE_NAME = 'RailRadar';
+
+// Horaires urbains (métro, RER, tram…) générés chaque nuit par GitHub dans la branche « data ».
+// Dépôt GitHub : Antoineeeuu/rainradar. En local, les fichiers de public/urban/ sont utilisés.
+const GITHUB_DATA = 'https://raw.githubusercontent.com/Antoineeeuu/rainradar/data/';
+const IS_LOCAL = ['localhost', '127.0.0.1', ''].includes(location.hostname);
+const URBAN_DATA_URL = IS_LOCAL || GITHUB_DATA.includes('VOTRE-PSEUDO') ? 'urban/' : GITHUB_DATA;
 const FEED_URL = 'https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-trip-updates';
 const ALERTS_URL = 'https://proxy.transport.data.gouv.fr/resource/sncf-gtfs-rt-service-alerts';
 const FEED_EVERY = 60 * 1000; // rechargement du flux temps réel (ms)
@@ -124,6 +131,8 @@ let stats = { running: 0, late: 0, avg: 0, counts: {} };
 let tip;
 let meMarker;
 let pendingHash = null;
+let urban = null;
+let urbanDirty = true;
 
 const nowSec = () => (Date.now() + clockOffset) / 1000;
 
@@ -200,6 +209,23 @@ function installLayers() {
     paint: { 'line-color': lgvColor, 'line-opacity': 0.6, 'line-width': railWidth },
   });
 
+  // réseaux urbains : tracés et stations (sous le parcours sélectionné)
+  map.addSource('urban-lines', { type: 'geojson', data: empty, tolerance: 0.3 });
+  map.addSource('urban-stations', { type: 'geojson', data: empty });
+  map.addSource('urban', { type: 'geojson', data: empty });
+  if (!map.hasImage('u-arrow')) map.addImage('u-arrow', arrowImage(), { sdf: true, pixelRatio: 2 });
+  map.addLayer({
+    id: 'urban-lines',
+    type: 'line',
+    source: 'urban-lines',
+    filter: ['>=', ['zoom'], ['get', 'mz']],
+    layout: { 'line-cap': 'round', 'line-join': 'round', 'line-sort-key': ['match', ['get', 'm'], 'rer', 3, 'transilien', 2, 1] },
+    paint: {
+      'line-color': ['get', 'c'],
+      'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 12, 2.4, 15, 4.5],
+      'line-opacity': th === 'sat' ? 0.9 : 0.78,
+    },
+  });
   map.addLayer({
     id: 'route-casing',
     type: 'line',
@@ -255,6 +281,34 @@ function installLayers() {
     paint: { 'text-color': ink, 'text-halo-color': halo, 'text-halo-width': 1.4, 'text-opacity': 0.9 },
   });
   map.addLayer({
+    id: 'urban-stations',
+    type: 'circle',
+    source: 'urban-stations',
+    filter: ['>=', ['zoom'], ['get', 'mz']],
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 2.2, 14, 4.2, 16, 6],
+      'circle-color': light ? '#ffffff' : '#0b1220',
+      'circle-stroke-color': ['get', 'c'],
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 11, 1.2, 15, 2.2],
+    },
+  });
+  map.addLayer({
+    id: 'urban-station-labels',
+    type: 'symbol',
+    source: 'urban-stations',
+    filter: ['>=', ['zoom'], ['+', ['get', 'mz'], 1.3]],
+    layout: {
+      'text-field': ['get', 'n'],
+      'text-font': FONT_REG,
+      'text-size': ['interpolate', ['linear'], ['zoom'], 12, 10.5, 16, 12.5],
+      'text-anchor': 'top',
+      'text-offset': [0, 0.6],
+      'text-max-width': 8,
+      'text-padding': 4,
+    },
+    paint: { 'text-color': ink, 'text-halo-color': halo, 'text-halo-width': 1.4, 'text-opacity': 0.85 },
+  });
+  map.addLayer({
     id: 'route-stops',
     type: 'circle',
     source: 'route-stops',
@@ -291,6 +345,64 @@ function installLayers() {
       'circle-opacity': 0.16,
       'circle-stroke-color': '#ffc83d',
       'circle-stroke-width': 2,
+    },
+  });
+  // véhicules urbains : pastille couleur de ligne + numéro + flèche de direction
+  map.addLayer({
+    id: 'urban-arrow',
+    type: 'symbol',
+    source: 'urban',
+    layout: {
+      'icon-image': 'u-arrow',
+      'icon-rotate': ['get', 'b'],
+      'icon-rotation-alignment': 'map',
+      'icon-allow-overlap': true,
+      'icon-ignore-placement': true,
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 9, 0.45, 12, 0.7, 15, 0.95],
+      'icon-offset': [0, -17],
+      'symbol-sort-key': ['get', 'z'],
+    },
+    paint: { 'icon-color': ['get', 'c'], 'icon-halo-color': light ? '#ffffff' : '#0b1220', 'icon-halo-width': 1.2 },
+  });
+  map.addLayer({
+    id: 'urban-veh',
+    type: 'circle',
+    source: 'urban',
+    layout: { 'circle-sort-key': ['get', 'z'] },
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.2, 11, 4.6, 12, 7.5, 14, 9.5, 16, 11],
+      'circle-color': ['get', 'c'],
+      'circle-stroke-color': light ? '#ffffff' : '#0b1220',
+      'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1, 13, 1.8],
+    },
+  });
+  map.addLayer({
+    id: 'urban-label',
+    type: 'symbol',
+    source: 'urban',
+    minzoom: 11.5,
+    layout: {
+      'text-field': ['get', 't'],
+      'text-font': FONT_BOLD,
+      'text-size': ['interpolate', ['linear'], ['zoom'], 11.5, 7.5, 14, 9.5, 16, 11],
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+      'symbol-sort-key': ['get', 'z'],
+    },
+    paint: { 'text-color': ['get', 'tc'] },
+  });
+  map.addLayer({
+    id: 'urban-delay',
+    type: 'circle',
+    source: 'urban',
+    filter: ['>', ['get', 'd'], 0],
+    minzoom: 11.5,
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 11.5, 2.4, 15, 3.6],
+      'circle-color': ['match', ['get', 'd'], 2, '#ff3b40', '#ff9f1a'],
+      'circle-stroke-color': '#0b1220',
+      'circle-stroke-width': 1.2,
+      'circle-translate': ['interpolate', ['linear'], ['zoom'], 11.5, ['literal', [6, -6]], 15, ['literal', [9, -9]]],
     },
   });
   map.addLayer({
@@ -338,8 +450,34 @@ function installLayers() {
   });
 
   layersReady = true;
+  urbanDirty = true;
   tick();
   updateRoute();
+}
+
+/** Recharge les tracés et stations urbains (après chargement d'un réseau ou d'un filtre). */
+function refreshUrbanStatic() {
+  if (!layersReady || !urban) return;
+  map.getSource('urban-lines').setData(urban.linesGeoJSON());
+  map.getSource('urban-stations').setData(urban.stationsGeoJSON());
+  urbanDirty = false;
+}
+
+/** Transmet les trains SNCF d'Île-de-France (Transilien, RER) au module urbain comme temps réel. */
+function feedSncfToUrban() {
+  if (!urban || !urban.nets.has('idf')) return;
+  const list = [];
+  for (const tr of trains.values()) {
+    if (tr.hidden || tr.canceled || tr.group !== 'ter') continue;
+    if (!tr.mv.some((s) => s.st.lat > 48.1 && s.st.lat < 49.25 && s.st.lon > 1.4 && s.st.lon < 3.6)) continue;
+    list.push({ id: tr.id, stops: tr.mv.map((s) => ({ uic: s.uic, lon: s.st.lon, lat: s.st.lat, dep: s.dep, depDelay: s.depDelay, arr: s.arr, arrDelay: s.arrDelay })) });
+  }
+  urban.applySncf(list);
+}
+
+function urbanView() {
+  const b = map.getBounds();
+  return { w: b.getWest(), e: b.getEast(), s: b.getSouth(), n: b.getNorth(), zoom: map.getZoom() };
 }
 
 function setTheme(theme) {
@@ -358,11 +496,27 @@ function viewOffset() {
   return [200, 40];
 }
 
+function nearestHit(hits, p) {
+  let best = hits[0];
+  let bd = Infinity;
+  for (const f of hits) {
+    const q = map.project(f.geometry.coordinates);
+    const d = (q.x - p.x) ** 2 + (q.y - p.y) ** 2;
+    if (d < bd) {
+      bd = d;
+      best = f;
+    }
+  }
+  return best;
+}
+
 function onMapClick(e) {
   if (!layersReady) return;
   const p = e.point;
   const box = [[p.x - 12, p.y - 12], [p.x + 12, p.y + 12]];
+  const uhits = urban ? map.queryRenderedFeatures(box, { layers: ['urban-veh'] }) : [];
   const hits = map.queryRenderedFeatures(box, { layers: ['trains'] });
+  if (uhits.length && !hits.length) return selectUrbanTrip(nearestHit(uhits, p).properties.id.slice(2), { fly: false });
   if (hits.length) {
     let best = hits[0];
     let bd = Infinity;
@@ -377,9 +531,15 @@ function onMapClick(e) {
     const tr = trains.get(best.properties.id);
     if (tr) return selectTrain(tr, { fly: false });
   }
-  const st = map.queryRenderedFeatures(box, { layers: ['route-stops', 'stations'] });
-  if (st.length) return selectStation(st[0].properties.uic, { fly: false });
-  if (state.sel && (state.sel.kind === 'train' || state.sel.kind === 'station')) closePanel();
+  if (uhits.length) return selectUrbanTrip(nearestHit(uhits, p).properties.id.slice(2), { fly: false });
+  const st = map.queryRenderedFeatures(box, { layers: ['route-stops', 'urban-stations', 'stations'] });
+  if (st.length) {
+    const pr = st[0].properties;
+    if (pr.us) return selectUrbanStation(pr.us, { fly: false });
+    if (pr.uic) return selectStation(pr.uic, { fly: false });
+    if (pr.id) return selectUrbanStation(pr.id, { fly: false });
+  }
+  if (state.sel && ['train', 'station', 'uveh', 'ustation'].includes(state.sel.kind)) closePanel();
 }
 
 function onMapMove(e) {
@@ -401,7 +561,24 @@ function onMapMove(e) {
       return;
     }
   }
-  const st = map.queryRenderedFeatures(e.point, { layers: ['stations', 'route-stops'] });
+  const uh = urban ? map.queryRenderedFeatures(e.point, { layers: ['urban-veh'] }) : [];
+  if (uh.length) {
+    const tr = urban.trip(uh[0].properties.id.slice(2));
+    if (tr && tr.pos) {
+      map.getCanvas().style.cursor = 'pointer';
+      const src = urban.sourceOf(tr, nowSec());
+      const status = src === 'gps' ? t('src.gpsShort') : src === 'rt' ? `<span class="${delayClass(tr.delay)}">${esc(delayText(tr.delay))}</span>` : esc(t('src.theoShort'));
+      tip
+        .setLngLat([tr.pos.lon, tr.pos.lat])
+        .setHTML(
+          `<div class="tip-title">${lineBadge(tr.line)}<span>${esc(t('mode.' + tr.line.mode))} ${esc(tr.line.label)}</span></div>` +
+            `<div class="tip-sub">→ ${esc(tr.prof.pat.head)}</div><div class="tip-sub">${status}</div>`,
+        )
+        .addTo(map);
+      return;
+    }
+  }
+  const st = map.queryRenderedFeatures(e.point, { layers: ['stations', 'route-stops', 'urban-stations'] });
   if (st.length) {
     map.getCanvas().style.cursor = 'pointer';
     tip.setLngLat(st[0].geometry.coordinates).setHTML(`<div class="tip-title">${esc(st[0].properties.n)}</div>`).addTo(map);
@@ -439,6 +616,7 @@ async function refreshFeed() {
       if (cur) state.sel.id = cur.id;
     }
     if (pendingHash) applyHash();
+    feedSncfToUrban();
     tick();
     renderPanel(true);
     updateRoute();
@@ -487,6 +665,7 @@ function tick() {
   let running = 0;
   let late = 0;
   let sum = 0;
+  const zoom = map.getZoom();
   const selId = state.sel && state.sel.kind === 'train' ? state.sel.id : null;
   let selPos = null;
   for (const tr of trains.values()) {
@@ -500,6 +679,7 @@ function tick() {
     const isSel = tr.id === selId;
     if (isSel) selPos = pos;
     else if (!state.filters[tr.group] || (state.lateOnly && pos.delay < 300)) continue;
+    else if (urban && urban.sncfMatched && urban.hidesSncf(tr.id, zoom)) continue; // affiché comme Transilien/RER
     const vertical = pos.bearing % 180 < 45 || pos.bearing % 180 > 135;
     feats.push({
       type: 'Feature',
@@ -508,7 +688,16 @@ function tick() {
     });
   }
   map.getSource('trains').setData({ type: 'FeatureCollection', features: feats });
-  const selSt = state.sel && state.sel.kind === 'station' ? rail.stations[state.sel.uic] : null;
+  if (urban && urban.nets.size) {
+    if (urbanDirty) refreshUrbanStatic();
+    const selKey = state.sel && state.sel.kind === 'uveh' ? state.sel.key : null;
+    map.getSource('urban').setData({ type: 'FeatureCollection', features: urban.features(now, urbanView(), selKey) });
+    if (selKey) {
+      const ut = urban.trip(selKey);
+      if (ut && ut.pos && urban.locate(ut, now)) selPos = ut.pos;
+    }
+  }
+  const selSt = state.sel && state.sel.kind === 'station' ? rail.stations[state.sel.uic] : state.sel && state.sel.kind === 'ustation' && urban ? urban.station(state.sel.key) : null;
   const ring = selPos ? [selPos.lon, selPos.lat] : selSt ? [selSt.lon, selSt.lat] : null;
   map.getSource('sel').setData({
     type: 'FeatureCollection',
@@ -585,6 +774,144 @@ function selectStation(uic, opts = {}) {
   if (opts.fly !== false) map.flyTo({ center: [st.lon, st.lat], zoom: Math.max(map.getZoom(), 11), offset: viewOffset(), duration: 1200 });
 }
 
+function lineBadge(line, big) {
+  const shape = line.mode === 'metro' || line.mode === 'val' ? 'round' : line.mode === 'rer' || line.mode === 'transilien' ? 'square' : 'pill';
+  return `<span class="lbadge ${shape}${big ? ' big' : ''}" style="--c:${line.color};--ink:${line.text}">${esc(line.label)}</span>`;
+}
+
+async function selectUrbanTrip(key, opts = {}) {
+  if (!urban) return;
+  let tr = urban.trip(key);
+  if (!tr) {
+    await urban.load(key.split('|')[0], nowSec());
+    tr = urban.trip(key);
+    if (!tr) return;
+  }
+  state.sel = { kind: 'uveh', key };
+  state.follow = false;
+  setHash('u=' + key);
+  urban.locate(tr, nowSec());
+  openPanel();
+  tick();
+  updateRoute();
+  if (opts.fly !== false && tr.pos) map.flyTo({ center: [tr.pos.lon, tr.pos.lat], zoom: Math.max(map.getZoom(), zoomFor(tr.net.id, tr.line.mode, 'v') + 1), offset: viewOffset(), duration: 1200 });
+}
+
+async function selectUrbanStation(key, opts = {}) {
+  if (!urban) return;
+  if (!urban.station(key)) await urban.load(key.split('|')[0], nowSec());
+  const st = urban.station(key);
+  if (!st) return;
+  state.sel = { kind: 'ustation', key };
+  state.follow = false;
+  setHash('us=' + key);
+  openPanel();
+  tick();
+  updateRoute();
+  if (opts.fly !== false) map.flyTo({ center: [st.lon, st.lat], zoom: Math.max(map.getZoom(), 14), offset: viewOffset(), duration: 1200 });
+}
+
+const selectedUrban = () => (state.sel && state.sel.kind === 'uveh' && urban ? urban.trip(state.sel.key) : null);
+
+function urbanTripPanel() {
+  const tr = selectedUrban();
+  if (!tr) return head(esc(t('noPosition')), '') + '<div class="p-body"></div>';
+  const line = tr.line;
+  const net = tr.net;
+  const title = `${lineBadge(line, true)}<span>${esc(t('mode.' + line.mode))} ${esc(line.label)}</span>`;
+  const sub = `${UI.arrow}<strong>${esc(tr.prof.pat.head)}</strong><span class="muted-dot">·</span><span>${esc(t('city.' + net.id))}</span>`;
+  let h = head(title, sub, '') + '<div class="p-body">';
+  h += `<div id="uSource"></div>`;
+  const alerts = net.alerts.get(line.id) || [];
+  for (const a of alerts.slice(0, 3)) h += `<div class="note">${UI.warn}<div><strong>${esc(a.type || t('trafficInfo'))}</strong><p>${esc(a.text)}</p></div></div>`;
+  h += `<div class="art-wrap">${urbanArt(line.mode, line.color)}<div class="art-cap"><span>${esc(t('model'))}</span><strong>${esc(urbanModel(net.id, line))}</strong></div></div>`;
+  h +=
+    `<div class="kpis">` +
+    `<div class="kpi"><div class="k">${esc(t('delay'))}</div><div class="v" id="kDelay">–</div></div>` +
+    `<div class="kpi"><div class="k">${esc(t('speed'))}</div><div class="v" id="kSpeed">–</div></div>` +
+    `<div class="kpi wide"><div class="k" id="kNextLabel">${esc(t('nextStop'))}</div><div class="v" id="kNext">–</div><div class="s" id="kNextSub"></div></div>` +
+    `</div>` +
+    `<div class="btn-row">` +
+    `<button class="btn" data-act="follow" aria-pressed="${state.follow}">${UI.follow}<span>${esc(t(state.follow ? 'following' : 'follow'))}</span></button>` +
+    `<button class="btn" data-act="share">${UI.share}<span>${esc(t('share'))}</span></button></div>`;
+  h += `<h3 class="sec">${esc(t('nextStations'))}</h3><ol class="timeline" id="timeline">`;
+  for (const s of urban.tripStops(tr)) {
+    const late = s.time - s.sched >= 60;
+    const tm = late ? `<s>${hm(s.sched)}</s><span class="real ${delayClass(s.time - s.sched)}">${hm(s.time)}</span>` : `<span class="real">${hm(s.time)}</span>`;
+    h += `<li data-t="${s.time}"><div class="tm">${tm}</div><div class="rail"></div><div class="st"><button data-act="ustation" data-key="${esc(net.id + '|' + s.st.i)}">${esc(s.st.n)}</button></div></li>`;
+  }
+  h += '</ol></div>';
+  return h;
+}
+
+function updateUrbanLive() {
+  const tr = selectedUrban();
+  if (!tr) return;
+  const now = nowSec();
+  const pos = urban.locate(tr, now);
+  const src = urban.sourceOf(tr, now);
+  const box = $('uSource');
+  if (box && box.dataset.src !== src) {
+    box.dataset.src = src;
+    box.innerHTML = `<div class="note ${src === 'gps' || src === 'rt' ? 'note-live' : 'plain'}">${src === 'gps' || src === 'rt' ? UI.follow : UI.clock}<div><strong>${esc(t('src.' + src))}</strong><p>${esc(t('srcNote.' + src))}</p></div></div>`;
+  }
+  const kd = $('kDelay');
+  if (!kd) return;
+  if (src === 'theo' || src === 'nokey') {
+    kd.textContent = t('src.theoShort');
+    kd.className = 'v';
+  } else {
+    kd.textContent = delayText(tr.delay);
+    kd.className = 'v ' + delayClass(tr.delay);
+  }
+  $('kSpeed').innerHTML = pos && pos.moving ? `${Math.round(pos.speed / 5) * 5} <small>${esc(t('kmh'))}</small>` : pos ? `<small>${esc(t('atStation'))}</small>` : '–';
+  const stops = urban.tripStops(tr);
+  const k = pos ? (pos.moving ? pos.k + 1 : pos.k) : now < tr.start ? 0 : stops.length - 1;
+  const next = stops[Math.min(k, stops.length - 1)];
+  $('kNextLabel').textContent = pos && !pos.moving ? t('stopped') : t('nextStop');
+  $('kNext').textContent = next ? next.st.n : '–';
+  $('kNextSub').textContent = next ? t(pos && pos.moving ? 'arrivalAt' : 'departureAt', { time: hm(next.time) }) : '';
+  const tl = $('timeline');
+  if (tl) {
+    let here = false;
+    [...tl.children].forEach((li, i) => {
+      const done = pos ? i < k || (!pos.moving && i === k && false) : now > tr.end;
+      li.classList.toggle('done', done);
+      li.classList.toggle('here', !done && !here);
+      if (!done) here = true;
+    });
+  }
+}
+
+function urbanStationPanel() {
+  const st = urban && urban.station(state.sel.key);
+  if (!st) return head('…', '') + '<div class="p-body"></div>';
+  const net = urban.nets.get(st.net);
+  const lines = st.lines.map((i) => net.lines[i]);
+  const sub = lines.map((l) => lineBadge(l)).join('') + `<span class="muted-dot">·</span><span>${esc(t('city.' + net.id))}</span>`;
+  let h = head(esc(st.n), sub, '') + '<div class="p-body">';
+  const now = nowSec();
+  const rows = urban.board(st, now);
+  h += `<h3 class="sec" style="margin-top:4px">${esc(t('passages'))}</h3>`;
+  if (!rows.length) h += `<div class="empty-msg">${esc(t('noPassages'))}</div>`;
+  else {
+    h += '<div class="rows">';
+    for (const r of rows) {
+      const min = Math.max(0, Math.round((r.time - now) / 60));
+      const when = min < 1 ? t('imminent') : t('inMin', { n: min });
+      const late = r.live && r.delay >= 60;
+      h +=
+        `<button class="row" data-act="utrip" data-key="${esc(net.id + '|' + r.tr.key)}">` +
+        `<div class="tm">${late ? `<s>${hm(r.time - r.delay)}</s>` : ''}${hm(r.time)}</div>` +
+        `<div class="mid"><div class="l1">${lineBadge(r.tr.line)}<span>${esc(r.tr.prof.pat.head)}</span></div><div class="l2">${r.live ? esc(t('src.rtShort')) : esc(t('src.theoShort'))}</div></div>` +
+        `<div class="end ${r.live ? delayClass(r.delay) : ''}">${esc(when)}</div></button>`;
+    }
+    h += '</div>';
+  }
+  h += `<p class="small">${esc(t('boardNoteUrban'))}</p></div>`;
+  return h;
+}
+
 function openSimple(kind) {
   if (state.sel && state.sel.kind === kind) return closePanel();
   state.sel = { kind };
@@ -627,7 +954,7 @@ function setFollow(on) {
     b.querySelector('span').textContent = t(on ? 'following' : 'follow');
   }
   if (on) {
-    const tr = selectedTrain();
+    const tr = selectedTrain() || selectedUrban();
     if (tr && tr.pos) map.flyTo({ center: [tr.pos.lon, tr.pos.lat], zoom: Math.max(map.getZoom(), 11), offset: viewOffset(), duration: 900 });
   }
 }
@@ -681,6 +1008,19 @@ function updateRoute() {
       });
     });
   }
+  const ut = selectedUrban();
+  if (ut) {
+    const g = urban.routeGeo(ut, nowSec());
+    if (g.done.length > 1) feats.push({ type: 'Feature', properties: { part: 'done' }, geometry: { type: 'LineString', coordinates: g.done } });
+    if (g.todo.length > 1) feats.push({ type: 'Feature', properties: { part: 'todo' }, geometry: { type: 'LineString', coordinates: g.todo } });
+    for (const s of g.stops) {
+      stops.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [s.st.lon, s.st.lat] },
+        properties: { us: s.st.net + '|' + s.st.i, n: s.st.n, done: s.done, p: s.edge ? 0 : 1 },
+      });
+    }
+  }
   map.getSource('route').setData({ type: 'FeatureCollection', features: feats });
   map.getSource('route-stops').setData({ type: 'FeatureCollection', features: stops });
 }
@@ -698,6 +1038,8 @@ function renderPanel(keepScroll) {
   else if (kind === 'station') html = stationPanel();
   else if (kind === 'stats') html = statsPanel();
   else if (kind === 'favs') html = favsPanel();
+  else if (kind === 'uveh') html = urbanTripPanel();
+  else if (kind === 'ustation') html = urbanStationPanel();
   panel.innerHTML = `<button class="grip" data-act="grip" aria-label="${esc(t('resize'))}"></button>` + html;
   const nb = panel.querySelector('.p-body');
   if (nb) nb.scrollTop = scroll;
@@ -705,6 +1047,7 @@ function renderPanel(keepScroll) {
     renderAlerts();
     updatePanelLive();
   }
+  if (kind === 'uveh') updateUrbanLive();
 }
 
 function head(title, sub, favKey) {
@@ -784,6 +1127,21 @@ function renderAlerts() {
 function updatePanelLive() {
   if (!state.sel) return;
   if (state.sel.kind === 'stats') return updateStatsLive();
+  if (state.sel.kind === 'uveh') {
+    updateUrbanLive();
+    if (nowSec() - (updatePanelLive.lastU || 0) > 2) {
+      updatePanelLive.lastU = nowSec();
+      updateRoute();
+    }
+    return;
+  }
+  if (state.sel.kind === 'ustation') {
+    if (nowSec() - (updatePanelLive.lastS || 0) > 20) {
+      updatePanelLive.lastS = nowSec();
+      renderPanel(true);
+    }
+    return;
+  }
   if (state.sel.kind !== 'train') return;
   const tr = selectedTrain();
   if (!tr) return;
@@ -999,8 +1357,9 @@ function toast(msg) {
 
 async function share() {
   const tr = selectedTrain();
+  const ut = selectedUrban();
   const url = location.href;
-  const title = tr ? `${tr.brand} ${tr.num} — ${SITE_NAME}` : SITE_NAME;
+  const title = tr ? `${tr.brand} ${tr.num} — ${SITE_NAME}` : ut ? `${t('mode.' + ut.line.mode)} ${ut.line.label} → ${ut.prof.pat.head} — ${SITE_NAME}` : SITE_NAME;
   try {
     if (navigator.share && isMobile()) await navigator.share({ title, url });
     else {
@@ -1015,9 +1374,10 @@ async function share() {
 // ---- Barre du haut : recherche, filtres, pastille ---------------------------------------------
 
 function search(q) {
-  const out = { trains: [], stations: [] };
+  const out = { trains: [], stations: [], ustations: [] };
   const nq = norm(q);
   if (!nq) return out;
+  if (urban && nq.length >= 2 && /[a-z]/.test(nq)) out.ustations = urban.searchStations(nq, norm);
   const digits = nq.replace(/\s/g, '');
   if (/^\d+$/.test(digits)) {
     for (const [num, tr] of byNumber) if (num.startsWith(digits)) out.trains.push(tr);
@@ -1037,6 +1397,32 @@ function search(q) {
     out.stations = hits.slice(0, 8).map((h) => h[1]);
   }
   return out;
+}
+
+function renderSncfResults(r) {
+  let h = '';
+  if (r.stations.length) {
+    h += `<h4>${esc(t('resultStations'))}</h4>`;
+    for (const s of r.stations) {
+      h += `<button class="result" data-i="${resultItems.length}"><span class="r-icon">${UI.station}</span><span class="r-main"><div class="r-title">${esc(s.n)}</div></span></button>`;
+      resultItems.push(() => selectStation(s.uic));
+    }
+  }
+  return h;
+}
+
+function renderUrbanResults(r) {
+  let h = '';
+  if (r.ustations.length) {
+    h += `<h4>${esc(t('resultUrban'))}</h4>`;
+    for (const s of r.ustations) {
+      const net = urban.nets.get(s.net);
+      const badges = s.lines.slice(0, 6).map((i) => lineBadge(net.lines[i])).join('');
+      h += `<button class="result" data-i="${resultItems.length}"><span class="r-icon">${UI.station}</span><span class="r-main"><div class="r-title">${esc(s.n)}</div><div class="r-sub r-badges">${badges}<span>${esc(t('city.' + s.net))}</span></div></span></button>`;
+      resultItems.push(() => selectUrbanStation(s.net + '|' + s.i));
+    }
+  }
+  return h;
 }
 
 let resultItems = [];
@@ -1060,13 +1446,11 @@ function renderResults() {
       resultItems.push(() => selectTrain(tr));
     }
   }
-  if (r.stations.length) {
-    h += `<h4>${esc(t('resultStations'))}</h4>`;
-    for (const s of r.stations) {
-      h += `<button class="result" data-i="${resultItems.length}"><span class="r-icon">${UI.station}</span><span class="r-main"><div class="r-title">${esc(s.n)}</div></span></button>`;
-      resultItems.push(() => selectStation(s.uic));
-    }
-  }
+  const nq = norm(q);
+  const starts = (n) => norm(n).startsWith(nq);
+  const urbanFirst = r.ustations.length && starts(r.ustations[0].n) && !(r.stations.length && starts(r.stations[0].n));
+  const sections = urbanFirst ? [renderUrbanResults, renderSncfResults] : [renderSncfResults, renderUrbanResults];
+  for (const fn of sections) h += fn(r);
   if (!resultItems.length) h = `<div class="empty">${esc(t('noResult'))}</div>`;
   resultActive = resultItems.length ? 0 : -1;
   box.innerHTML = h;
@@ -1095,8 +1479,75 @@ function renderChips() {
     h += `<button class="chip" data-g="${g}" aria-pressed="${state.filters[g]}" style="--c:${GROUP_STYLE[g].color}"><span class="dot"></span>${esc(t('g.' + g))}<span class="count" id="cnt-${g}"></span></button>`;
   }
   h += `<span class="chip-sep"></span><button class="chip late" data-g="late" aria-pressed="${state.lateOnly}"><span class="dot"></span>${esc(t('lateOnly'))}<span class="count" id="cnt-late"></span></button>`;
+  h += `<span class="chip-sep"></span><button class="chip urban-chip" data-g="urban" aria-expanded="${!$('urbanMenu').hidden}">${UI.layers}${esc(t('urbanNetworks'))}<span class="caret">${UI.chevron}</span></button>`;
   $('chips').innerHTML = h;
   updateChips();
+}
+
+const MODE_ORDER = { rer: 0, transilien: 1, metro: 2, tram: 3, val: 4, bus: 5 };
+
+function rtStatus(net) {
+  if (!net) return '';
+  if (net.id === 'bdx') return net.rtState === 'ok' ? t('rt.gps') : t('rt.theo');
+  if (net.id === 'lille') return t('rt.lille');
+  return { ok: t('rt.ok'), nokey: t('rt.nokey'), quota: t('rt.quota'), error: t('rt.error') }[net.rtState] || t('rt.theo');
+}
+
+function renderUrbanMenu() {
+  const box = $('urbanMenu');
+  if (box.hidden || !urban) return;
+  const open = state.urbanOpen || (state.urbanOpen = {});
+  let h = `<div class="um-head"><strong>${esc(t('urbanNetworks'))}</strong><button class="ghost" data-um="close" aria-label="${esc(t('close'))}">${UI.close}</button></div>`;
+  h += `<p class="um-hint">${esc(t('zoomHint'))}</p>`;
+  for (const city of CITIES) {
+    const info = urban.netInfo(city.id);
+    const net = urban.nets.get(city.id);
+    h += `<section class="um-city"><div class="um-city-head"><span>${esc(t('city.' + city.id))}</span><span class="um-rt" data-net="${city.id}">${esc(net ? rtStatus(net) : info ? t('notLoaded') : t('urbanUnavailable'))}</span></div>`;
+    if (!info) {
+      h += '</section>';
+      continue;
+    }
+    for (const mode of city.modes) {
+      const on = urban.isModeOn(city.id, mode);
+      const key = city.id + '|' + mode;
+      const lines = net ? net.lines.filter((l) => l.mode === mode).sort((a, b) => a.label.localeCompare(b.label, 'fr', { numeric: true })) : [];
+      if (net && !lines.length) continue;
+      const n = urban.visibleCount[key];
+      h +=
+        `<div class="um-mode"><label class="um-check"><input type="checkbox" data-um="mode" data-key="${key}" ${on ? 'checked' : ''}>` +
+        `<span>${esc(t('mode.' + mode))}</span>${n ? `<span class="count">${n}</span>` : ''}</label>` +
+        (lines.length ? `<button class="ghost um-more ${open[key] ? 'on' : ''}" data-um="expand" data-key="${key}" aria-expanded="${!!open[key]}" aria-label="${esc(t('lines'))}">${UI.chevron}</button>` : '') +
+        `</div>`;
+      if (open[key] && lines.length) {
+        h += `<div class="um-lines">`;
+        for (const l of lines) {
+          const lon = urban.isLineOn(city.id, l);
+          h += `<button class="um-line ${lon ? '' : 'off'}" data-um="line" data-net="${city.id}" data-line="${esc(l.id)}" aria-pressed="${lon}" title="${esc(l.long || l.label)}">${lineBadge(l)}</button>`;
+        }
+        h += `</div>`;
+      }
+    }
+    h += '</section>';
+  }
+  box.innerHTML = h;
+}
+
+function updateUrbanMenuStatus() {
+  const box = $('urbanMenu');
+  if (box.hidden || !urban) return;
+  box.querySelectorAll('.um-rt').forEach((el) => {
+    const net = urban.nets.get(el.dataset.net);
+    if (net) el.textContent = rtStatus(net);
+  });
+}
+
+function toggleUrbanMenu(force) {
+  const box = $('urbanMenu');
+  box.hidden = force === undefined ? !box.hidden : !force;
+  const chip = document.querySelector('.urban-chip');
+  if (chip) chip.setAttribute('aria-expanded', String(!box.hidden));
+  if (!box.hidden && urban) urban.loadAll(nowSec()).then(renderUrbanMenu);
+  renderUrbanMenu();
 }
 
 function updateChips() {
@@ -1154,6 +1605,13 @@ function locateMe() {
 // ---- Adresse partageable ------------------------------------------------------------------------
 
 function applyHash() {
+  const u = /^#(u|us)=([\w-]+\|[\w.-]+)$/.exec(decodeURIComponent(location.hash));
+  if (u) {
+    pendingHash = null;
+    if (u[1] === 'u') selectUrbanTrip(u[2]);
+    else selectUrbanStation(u[2]);
+    return;
+  }
   const m = /^#(train|gare)=([\w-]+)$/.exec(location.hash);
   pendingHash = null;
   if (!m) return;
@@ -1208,10 +1666,38 @@ function bindUi() {
     refreshTexts();
   };
 
+  $('urbanMenu').onclick = (e) => {
+    const b = e.target.closest('[data-um]');
+    if (!b) return;
+    const k = b.dataset.um;
+    if (k === 'close') return toggleUrbanMenu(false);
+    if (k === 'expand') {
+      state.urbanOpen[b.dataset.key] = !state.urbanOpen[b.dataset.key];
+      return renderUrbanMenu();
+    }
+    if (k === 'line') {
+      const net = urban.nets.get(b.dataset.net);
+      const line = net && net.lines.find((l) => l.id === b.dataset.line);
+      if (!line) return;
+      urban.setOff(b.dataset.net + '|' + line.id, urban.isLineOn(b.dataset.net, line));
+    }
+    urbanDirty = true;
+    renderUrbanMenu();
+    tick();
+  };
+  $('urbanMenu').onchange = (e) => {
+    const b = e.target.closest('[data-um="mode"]');
+    if (!b) return;
+    urban.setOff(b.dataset.key, !b.checked);
+    urbanDirty = true;
+    renderUrbanMenu();
+    tick();
+  };
   $('chips').onclick = (e) => {
     const b = e.target.closest('.chip');
     if (!b) return;
     const g = b.dataset.g;
+    if (g === 'urban') return toggleUrbanMenu();
     if (g === 'late') state.lateOnly = !state.lateOnly;
     else {
       state.filters[g] = !state.filters[g];
@@ -1243,8 +1729,12 @@ function bindUi() {
     const b = e.target.closest('.result');
     if (b) pickResult(Number(b.dataset.i));
   };
+  q.addEventListener('focus', () => urban && urban.loadAll(nowSec()).then(() => q.value && renderResults()));
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.search')) $('results').hidden = true;
+    // le chemin du clic est figé avant tout redessin : un bouton du menu remplacé entre-temps compte bien comme « dans le menu »
+    const inMenu = e.composedPath().some((el) => el.id === 'urbanMenu' || (el.classList && el.classList.contains('urban-chip')));
+    if (!inMenu && !$('urbanMenu').hidden && !isMobile()) toggleUrbanMenu(false);
     if (!e.target.closest('.tools')) $('basemaps').hidden = true;
   });
 
@@ -1261,6 +1751,8 @@ function bindUi() {
     else if (act === 'follow') setFollow(!state.follow);
     else if (act === 'share') share();
     else if (act === 'station') selectStation(b.dataset.uic);
+    else if (act === 'ustation') selectUrbanStation(b.dataset.key);
+    else if (act === 'utrip') selectUrbanTrip(b.dataset.key);
     else if (act === 'train') {
       const tr = trains.get(b.dataset.id);
       if (tr) selectTrain(tr);
@@ -1323,10 +1815,25 @@ async function main() {
   stationGeo = { type: 'FeatureCollection', features: feats };
   if (map.isStyleLoaded()) installLayers();
   else map.once('load', () => !layersReady && installLayers());
+  urban = new Urban(URBAN_DATA_URL, store);
+  urban.onChange = (kind) => {
+    if (kind === 'loaded') {
+      urbanDirty = true;
+      feedSncfToUrban();
+      renderUrbanMenu();
+    } else updateUrbanMenuStatus();
+    if (state.sel && (state.sel.kind === 'uveh' || state.sel.kind === 'ustation') && kind !== 'realtime') renderPanel(true);
+  };
+  urban.init().then(() => {
+    const go = () => urban.ensure(urbanView(), map.getZoom(), nowSec());
+    map.on('moveend', go);
+    go();
+    if (/^#us?=/.test(location.hash)) applyHash();
+  });
   if (location.hash) {
     const m = /^#gare=/.test(location.hash);
     if (m) applyHash();
-    else pendingHash = location.hash;
+    else if (!/^#us?=/.test(location.hash)) pendingHash = location.hash;
   }
   await refreshFeed();
   setInterval(refreshFeed, FEED_EVERY);

@@ -174,3 +174,90 @@ export const UI = {
   warn: P('<path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17v.1"/>'),
   chevron: P('<path d="m9 6 6 6-6 6"/>'),
 };
+
+// --- Réseaux urbains --------------------------------------------------------------------
+
+/** Petite flèche blanche (image SDF, recolorée par la carte) indiquant le sens de marche. */
+export function arrowImage() {
+  const s = 24;
+  const c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff';
+  g.beginPath();
+  g.moveTo(s / 2, 2);
+  g.lineTo(s - 4, s - 4);
+  g.lineTo(s / 2, s - 9);
+  g.lineTo(4, s - 4);
+  g.closePath();
+  g.fill();
+  return g.getImageData(0, 0, s, s);
+}
+
+// Matériel le plus courant par ligne (indicatif : la rame exacte n'est pas publiée).
+const URBAN_MODELS = {
+  idf: {
+    1: 'MP05', 2: 'MF01', 3: 'MF67', '3B': 'MF67 / MF19', 4: 'MP14', 5: 'MF01', 6: 'MP73 / MP89', 7: 'MF77',
+    '7B': 'MF88 / MF19', 8: 'MF77', 9: 'MF01', 10: 'MF67 / MF19', 11: 'MP14', 12: 'MF67', 13: 'MF77 / MF19', 14: 'MP14',
+    A: 'MI09 / MI2N', B: 'MI79 / MI84', C: 'Z 2N', D: 'Z 2N / Regio 2N', E: 'MI2N / RER NG',
+    H: 'Francilien', J: 'Francilien / Z 2N', K: 'Regio 2N', L: 'Francilien', N: 'Regio 2N', P: 'Francilien / Regio 2N',
+    R: 'Regio 2N', U: 'Z 2N', V: 'Regio 2N',
+    T1: 'Citadis', T2: 'Citadis 302', T3a: 'Citadis 402', T3b: 'Citadis 402', T4: 'Citadis Dualis', T5: 'Translohr STE3',
+    T6: 'Translohr STE6', T7: 'Citadis 302', T8: 'Citadis 302', T9: 'Citadis X05', T10: 'Citadis X05', T11: 'Citadis Dualis',
+    T12: 'Citadis Dualis', T13: 'Citadis Dualis', T14: 'Citadis', OV: 'VAL 206', CDG: 'VAL 208',
+  },
+  lille: { M1: 'VAL 206 / VAL 208', M2: 'VAL 208', T: 'Breda VLC / Citadis' },
+  bdx: { A: 'Citadis 302 / 402', B: 'Citadis 302 / 402', C: 'Citadis 302 / 402', D: 'Citadis 402', E: 'Citadis 402', F: 'Citadis 402', G: 'Bus articulé électrique' },
+};
+
+export function urbanModel(net, line) {
+  const m = URBAN_MODELS[net] && URBAN_MODELS[net][line.label];
+  if (m) return m;
+  return { metro: 'Métro', tram: 'Tramway', rer: 'Train RER', transilien: 'Train Transilien', val: 'VAL', bus: 'Bus' }[line.mode] || '';
+}
+
+/** Illustration de profil d'un véhicule urbain, aux couleurs de la ligne. */
+export function urbanArt(mode, color) {
+  const win = '#1b2536';
+  const body = mode === 'rer' || mode === 'transilien' ? '#EEF1F6' : '#F3F4F7';
+  const floor = 60;
+  let top = 22;
+  let nose;
+  let wins = '';
+  let extra = '';
+  const w = (x0, x1, y, h, step, ww) => {
+    let s = '';
+    for (let x = x0; x + ww <= x1; x += step) s += `<rect x="${x}" y="${y}" width="${ww}" height="${h}" rx="2.5" fill="${win}"/>`;
+    return s;
+  };
+  if (mode === 'rer' || mode === 'transilien') {
+    top = 12;
+    nose = `M8 ${floor}V${top + 14}C8 ${top + 4} 18 ${top} 32 ${top}H344V${floor}Z`;
+    wins = w(46, 336, top + 8, 9, 16, 11) + w(46, 336, top + 30, 9, 16, 11);
+    extra = `<path d="M12 ${top + 18}C13 ${top + 9} 20 ${top + 5} 30 ${top + 5}V${top + 18}Z" fill="${win}"/>`;
+  } else if (mode === 'bus') {
+    top = 18;
+    nose = `M10 ${floor - 4}V${top + 8}Q10 ${top} 20 ${top}H330Q338 ${top} 338 ${top + 8}V${floor - 4}Z`;
+    wins = w(40, 330, top + 6, 18, 24, 20);
+    extra = `<rect x="14" y="${top + 6}" width="20" height="24" rx="3" fill="${win}"/><rect x="168" y="${top + 4}" width="6" height="${floor - top - 8}" fill="#111827" opacity=".6"/>`;
+  } else {
+    // métro, tram, VAL
+    top = mode === 'tram' ? 20 : 24;
+    const r = mode === 'tram' ? 16 : 8;
+    nose = `M8 ${floor}V${top + r}Q8 ${top} ${8 + r * 1.6} ${top}H344V${floor}Z`;
+    wins = w(48, 336, top + 7, 16, 22, 17);
+    extra = `<path d="M13 ${top + 22}V${top + r}Q13 ${top + 5} ${13 + r} ${top + 5}H34V${top + 22}Z" fill="${win}"/>`;
+    if (mode === 'tram') extra += `<path d="M150 ${top}L160 ${top - 12}M170 ${top - 12}H140" stroke="#8C93A3" stroke-width="2"/>`;
+  }
+  const band = `<rect x="8" y="${floor - 12}" width="336" height="5" fill="${color}"/>`;
+  const wheels = mode === 'bus'
+    ? [60, 250, 300].map((x) => `<circle cx="${x}" cy="${floor}" r="9" fill="#111827"/><circle cx="${x}" cy="${floor}" r="4" fill="#3b475e"/>`).join('')
+    : [40, 120, 230, 310].map((x) => `<circle cx="${x}" cy="${floor + 4}" r="4.5" fill="#3b475e"/><circle cx="${x + 12}" cy="${floor + 4}" r="4.5" fill="#3b475e"/>`).join('');
+  return (
+    `<svg class="art" viewBox="0 0 344 78" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">` +
+    `<defs><linearGradient id="uf" x1="0" x2="1"><stop offset=".78" stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>` +
+    `<mask id="um"><rect width="344" height="78" fill="url(#uf)"/></mask></defs><g mask="url(#um)">` +
+    (mode === 'bus' ? '' : `<path d="M0 ${floor + 10}H344" stroke="currentColor" stroke-width="1.5" opacity=".35"/>`) +
+    `<path d="${nose}" fill="${body}"/>${band}${extra}${wins}${wheels}</g></svg>`
+  );
+}

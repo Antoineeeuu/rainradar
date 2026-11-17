@@ -1,6 +1,45 @@
 // Textes de l'interface, en français et en anglais.
 
 const FR = {
+  urbanNetworks: 'Réseaux urbains',
+  zoomHint: 'Les métros et trams apparaissent en zoomant sur la ville, les RER et Transilien un peu avant.',
+  'city.idf': 'Paris et Île-de-France',
+  'city.lille': 'Lille',
+  'city.bdx': 'Bordeaux',
+  'mode.rer': 'RER',
+  'mode.transilien': 'Transilien',
+  'mode.metro': 'Métro',
+  'mode.tram': 'Tram',
+  'mode.val': 'Orlyval / CDGVAL',
+  'mode.bus': 'Bus express',
+  lines: 'Lignes',
+  notLoaded: 'chargé en approchant',
+  urbanUnavailable: 'indisponible',
+  'rt.ok': 'temps réel',
+  'rt.nokey': 'théorique (clé PRIM à configurer)',
+  'rt.quota': 'théorique (quota PRIM atteint)',
+  'rt.error': 'théorique (temps réel indisponible)',
+  'rt.gps': 'GPS en direct',
+  'rt.theo': 'horaires théoriques',
+  'rt.lille': 'tram en temps réel, métro théorique',
+  'src.gps': 'Position GPS réelle',
+  'src.rt': 'Temps réel',
+  'src.theo': 'Horaire théorique',
+  'src.nokey': 'Horaire théorique',
+  'src.gpsShort': 'GPS en direct',
+  'src.rtShort': 'temps réel',
+  'src.theoShort': 'Théorique',
+  'srcNote.gps': 'Position transmise par le véhicule lui-même (TBM), rafraîchie toutes les 20 secondes environ.',
+  'srcNote.rt': 'Position estimée d’après les heures de passage en temps réel publiées par l’exploitant.',
+  'srcNote.theo': 'Aucune donnée temps réel publique pour cette ligne : le véhicule suit l’horaire prévu.',
+  'srcNote.nokey': 'Le temps réel Île-de-France s’activera dès que la clé PRIM sera configurée dans Netlify.',
+  nextStations: 'Stations',
+  passages: 'Prochains passages',
+  noPassages: 'Aucun passage dans l’heure qui vient.',
+  imminent: 'Imminent',
+  inMin: '{n} min',
+  boardNoteUrban: 'Horaires temps réel quand l’exploitant les publie, sinon horaires prévus.',
+  resultUrban: 'Stations métro, tram, RER',
   tagline: 'Les trains de France en temps réel',
   searchPlaceholder: 'Numéro de train ou gare',
   searchLabel: 'Rechercher un train ou une gare',
@@ -88,13 +127,52 @@ const FR = {
     '<h3>D’où viennent les positions ?</h3>' +
     '<p>La SNCF ne publie pas la position GPS de ses trains. Elle publie en revanche, toutes les deux minutes environ, les horaires réels de chaque train à chacun de ses arrêts, retards compris. RailRadar place chaque train sur les voies entre ses deux arrêts, d’après ces horaires recalés. <strong>Les positions et les vitesses sont donc des estimations</strong> : elles sont justes en gare et approchées entre deux gares.</p>' +
     '<h3>Limites connues</h3>' +
-    '<ul><li>Les retards sont fournis par paliers de 5 minutes.</li><li>Un train arrêté en pleine voie apparaît en mouvement jusqu’à la mise à jour suivante.</li><li>À l’étranger, les trains suivent une ligne droite entre deux gares.</li><li>Le matériel affiché est le modèle le plus courant pour ce type de train, pas la rame exacte.</li><li>Les RER et le métro ne sont pas affichés.</li></ul>' +
+    '<ul><li>Les retards sont fournis par paliers de 5 minutes.</li><li>Un train arrêté en pleine voie apparaît en mouvement jusqu’à la mise à jour suivante.</li><li>À l’étranger, les trains suivent une ligne droite entre deux gares.</li><li>Le matériel affiché est le modèle le plus courant pour ce type de train, pas la rame exacte.</li><li>Métros, trams et RER apparaissent en zoomant sur la ville. À Bordeaux, les trams et le bus express G sont à leur position GPS réelle ; en Île-de-France et pour le tram de Lille, les positions sont recalées sur les heures de passage temps réel ; le métro de Lille suit l’horaire prévu (Ilévia ne publie pas de temps réel pour lui).</li></ul>' +
     '<h3>Sources</h3>' +
-    '<p>Horaires temps réel et réseau ferré : open data SNCF et SNCF Réseau, via transport.data.gouv.fr (licence ODbL). Quelques tronçons de voie et le fond de carte : © les contributeurs OpenStreetMap, tuiles OpenFreeMap. Vue satellite : © IGN.</p>' +
+    '<p>Horaires temps réel et réseau ferré : open data SNCF et SNCF Réseau, via transport.data.gouv.fr (licence ODbL). Quelques tronçons de voie et le fond de carte : © les contributeurs OpenStreetMap, tuiles OpenFreeMap. Vue satellite : © IGN. Réseaux urbains : Île-de-France Mobilités (PRIM), Ilévia / Métropole Européenne de Lille, TBM / Bordeaux Métropole ; tracés du métro et du tram de Lille © OpenStreetMap.</p>' +
     '<p class="muted">Site indépendant, sans lien avec la SNCF. À ne pas utiliser pour la sécurité ou pour décider de prendre un train : fiez-vous aux canaux officiels.</p>',
 };
 
 const EN = {
+  urbanNetworks: 'City networks',
+  zoomHint: 'Metro and tram vehicles appear when you zoom into the city, RER and Transilien a little earlier.',
+  'city.idf': 'Paris region',
+  'city.lille': 'Lille',
+  'city.bdx': 'Bordeaux',
+  'mode.rer': 'RER',
+  'mode.transilien': 'Transilien',
+  'mode.metro': 'Metro',
+  'mode.tram': 'Tram',
+  'mode.val': 'Orlyval / CDGVAL',
+  'mode.bus': 'Express bus',
+  lines: 'Lines',
+  notLoaded: 'loads when you get closer',
+  urbanUnavailable: 'unavailable',
+  'rt.ok': 'real time',
+  'rt.nokey': 'scheduled (PRIM key not set)',
+  'rt.quota': 'scheduled (PRIM quota reached)',
+  'rt.error': 'scheduled (real time unavailable)',
+  'rt.gps': 'live GPS',
+  'rt.theo': 'scheduled times',
+  'rt.lille': 'tram live, metro scheduled',
+  'src.gps': 'Live GPS position',
+  'src.rt': 'Real time',
+  'src.theo': 'Scheduled time',
+  'src.nokey': 'Scheduled time',
+  'src.gpsShort': 'Live GPS',
+  'src.rtShort': 'real time',
+  'src.theoShort': 'Scheduled',
+  'srcNote.gps': 'Position sent by the vehicle itself (TBM), refreshed about every 20 seconds.',
+  'srcNote.rt': 'Position estimated from the real-time arrival times published by the operator.',
+  'srcNote.theo': 'No public real-time data for this line: the vehicle follows its timetable.',
+  'srcNote.nokey': 'Paris-region real time will switch on once the PRIM key is set in Netlify.',
+  nextStations: 'Stops',
+  passages: 'Next departures',
+  noPassages: 'No departures in the coming hour.',
+  imminent: 'Due',
+  inMin: '{n} min',
+  boardNoteUrban: 'Real-time when the operator publishes it, otherwise scheduled times.',
+  resultUrban: 'Metro, tram, RER stops',
   tagline: 'Live trains across France',
   searchPlaceholder: 'Train number or station',
   searchLabel: 'Search for a train or a station',
@@ -182,9 +260,9 @@ const EN = {
     '<h3>Where do positions come from?</h3>' +
     '<p>SNCF does not publish GPS positions for its trains. It does publish, roughly every two minutes, the real-time timetable of every train at each of its stops, delays included. RailRadar places each train on the tracks between its two stops using those adjusted times. <strong>Positions and speeds are therefore estimates</strong>: exact at stations, approximate in between.</p>' +
     '<h3>Known limits</h3>' +
-    '<ul><li>Delays are reported in 5-minute steps.</li><li>A train halted between stations keeps moving on the map until the next update.</li><li>Outside France, trains follow a straight line between stations.</li><li>The rolling stock shown is the most common model for that train type, not the exact unit.</li><li>RER and metro lines are not shown.</li></ul>' +
+    '<ul><li>Delays are reported in 5-minute steps.</li><li>A train halted between stations keeps moving on the map until the next update.</li><li>Outside France, trains follow a straight line between stations.</li><li>The rolling stock shown is the most common model for that train type, not the exact unit.</li><li>Metro, tram and RER vehicles appear as you zoom into the city. In Bordeaux, trams and the G express bus are shown at their live GPS position; in the Paris region and for the Lille tram, positions follow real-time arrival times; the Lille metro follows its timetable (Ilévia publishes no real-time data for it).</li></ul>' +
     '<h3>Sources</h3>' +
-    '<p>Real-time timetable and rail network: SNCF and SNCF Réseau open data, via transport.data.gouv.fr (ODbL licence). A few track sections and the base map: © OpenStreetMap contributors, tiles by OpenFreeMap. Satellite view: © IGN.</p>' +
+    '<p>Real-time timetable and rail network: SNCF and SNCF Réseau open data, via transport.data.gouv.fr (ODbL licence). A few track sections and the base map: © OpenStreetMap contributors, tiles by OpenFreeMap. Satellite view: © IGN. City networks: Île-de-France Mobilités (PRIM), Ilévia / Lille Metropole, TBM / Bordeaux Métropole; Lille metro and tram tracks © OpenStreetMap.</p>' +
     '<p class="muted">Independent site, not affiliated with SNCF. Do not rely on it for safety or to decide whether to catch a train: use official channels.</p>',
 };
 

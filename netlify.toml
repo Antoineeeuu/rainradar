@@ -1,6 +1,10 @@
-# Netlify : aucun build, on publie simplement le dossier "public".
+# Netlify : aucun build, on publie simplement le dossier « public ».
+# Le relais temps réel Île-de-France est dans netlify/functions/idfm.mjs.
 [build]
   publish = "public"
+
+[functions]
+  directory = "netlify/functions"
 
 [[headers]]
   for = "/data/*"
