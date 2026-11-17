@@ -1,0 +1,43 @@
+# Régénère chaque nuit les horaires des métros, RER, Transilien et trams,
+# et les range dans la branche « data » du dépôt (le site les lit depuis GitHub).
+# Netlify ne republie rien : aucun crédit Netlify n'est consommé.
+name: Horaires urbains
+
+on:
+  schedule:
+    - cron: "17 1 * * *" # 2 h 17 (hiver) ou 3 h 17 (été), heure de Paris
+  workflow_dispatch: # bouton « Run workflow » pour lancer à la main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: urban-data
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Génère les horaires du jour
+        run: python3 tools/build_urban.py --out out
+
+      - name: Publie dans la branche data
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          cd out
+          git init -q -b data
+          git config user.name "railradar-bot"
+          git config user.email "railradar-bot@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Horaires du $(date -u +%F)"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${REPO}.git" data
